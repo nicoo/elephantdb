@@ -12,7 +12,8 @@
            [elephantdb.store DomainStore]
            [elephantdb.common.status IStateful IStatus KeywordStatus]
            [elephantdb.persistence ShardSet Shutdownable]
-           [java.util.concurrent ExecutionException]))
+           [java.util.concurrent ExecutionException]
+           [java.net NetworkInterface]))
 
 ;; Store manipulation
 
@@ -250,7 +251,7 @@
   [domain key]
   (shard/prioritize-hosts (.shardIndex domain)
                           (key->shard domain key)
-                          #{(.hostname domain)}))
+                          #{ (.hostnames domain)}))
 
 (defn index!
   "Accepts a domain and any number of pairs of shard-key and indexable
@@ -276,7 +277,7 @@
     (when-let [data (domain-data this)]
       (mapcat #(lazy-seq %)
               (vals (:shards data)))))
-  
+
   Shutdownable
   (shutdown [this]
     "Shutting down a domain requires closing all of its shards."
@@ -284,7 +285,7 @@
     (u/with-write-lock rwLock
       (close-shards! (-> (domain-data this)
                          (get :shards)))))
- 
+
   IStateful
   (get-status [_] @status)
   (to-ready [this]
@@ -309,6 +310,25 @@
   [domain]
   (version-seq (.localStore domain)))
 
+
+(defn addresses
+  "returns a set of local hostnames and ips available on the network interfaces."
+  []
+  (let [interfaces (enumeration-seq (NetworkInterface/getNetworkInterfaces))
+        interfaces (concat interfaces
+                           (flatten
+                            (remove nil?
+                                    (map #(enumeration-seq (.getSubInterfaces %))
+                                         interfaces))))]
+    (set
+     (flatten
+      (map (fn [interface]
+             (map (fn [inet-address]
+                    [(.getHostAddress inet-address)
+                     (.getHostName inet-address)])
+                  (enumeration-seq (.getInetAddresses interface))))
+           interfaces)))))
+
 ;; ## Domain Builder
 ;;
 ;; This is the main function used by a database to build its domain objects.
@@ -328,13 +348,14 @@
         local-spec    (.getSpec local-store)
         index (shard/generate-index hosts
                                     (.getNumShards local-spec)
-                                    replication)]
+                                    replication)
+        local-hostname (or (some (addresses) hosts) (u/local-hostname))]
     (doto (Domain. local-store
                    remote-store
                    (Utils/makeSerializer local-spec)
                    throttle
                    (u/mk-rw-lock)
-                   (u/local-hostname)
+                   local-hostname
                    (atom (KeywordStatus. :idle))
                    (atom nil)
                    index

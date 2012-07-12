@@ -251,7 +251,7 @@
   [domain key]
   (shard/prioritize-hosts (.shardIndex domain)
                           (key->shard domain key)
-                          #{ (.hostnames domain)}))
+                          #{ (.hostname domain)}))
 
 (defn index!
   "Accepts a domain and any number of pairs of shard-key and indexable
